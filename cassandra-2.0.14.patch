@@ -1,0 +1,262 @@
+--- apache-cassandra-2.0.14-src/src/java/org/apache/cassandra/utils/ObjectSizes.java	2015-03-30 10:18:57.000000000 -0400
++++ apache-cassandra-2.0.14-src-modified/src/java/org/apache/cassandra/utils/ObjectSizes.java	2015-07-31 20:58:15.597383034 -0400
+@@ -84,6 +84,19 @@ public class ObjectSizes
+      */
+     public static long getArraySize(int length, long elementSize)
+     {
++	final String javaVendor = System.getProperty("java.vendor");
++
++	if (javaVendor.startsWith("IBM")) {
++	    final String vmInfo = System.getProperty("java.vm.info");
++	    final boolean compressedRefs = vmInfo.contains("Compressed References");
++	    final int bitMode = Integer.parseInt(System.getProperty("com.ibm.vm.bitmode"));
++	    final double jvmVersion = Double.parseDouble(System.getProperty("java.vm.version"));
++            
++	    if ((bitMode != 64 || compressedRefs) && length == 0 && jvmVersion >= 2.6)
++		length = 1;
++	    
++        }
++
+         return roundTo(SPEC.getArrayHeaderSize() + length * elementSize, SPEC.getObjectPadding());
+     }
+ 
+@@ -134,111 +147,165 @@ public class ObjectSizes
+ 
+     private static MemoryLayoutSpecification getEffectiveMemoryLayoutSpecification()
+     {
+-        final String dataModel = System.getProperty("sun.arch.data.model");
+-        if ("32".equals(dataModel))
+-        {
+-            // Running with 32-bit data model
++
++        final String javaVendor = System.getProperty("java.vendor");
++
++        if (javaVendor.startsWith("IBM")) {
++            final int bitMode = Integer.parseInt(System.getProperty("com.ibm.vm.bitmode"));
++            final double jvmVersion = Double.parseDouble(System.getProperty("java.vm.version"));
++            final String vmInfo = System.getProperty("java.vm.info");
++            final boolean compressedRefs = vmInfo.contains("Compressed References") || vmInfo.contains("CMPRSS") ;
++                    
+             return new MemoryLayoutSpecification()
+-            {
++		{
+                 public int getArrayHeaderSize()
+                 {
+-                    return 12;
++                    if (bitMode != 64) 
++                        return jvmVersion < 2.6 ? 16 : 8;
++                    else if (!compressedRefs) 
++			return jvmVersion < 2.6 ? 24 : 16;
++                    else
++			return jvmVersion < 2.6 ? 16 : 8;
+                 }
+ 
+                 public int getObjectHeaderSize()
+                 {
+-                    return 8;
++                    if (bitMode != 64) 
++                      return jvmVersion < 2.6 ? 12 : 8;
++                    else if (!compressedRefs) 
++			return jvmVersion < 2.6 ? 24 : 16;
++		    else
++			return jvmVersion < 2.6 ? 12 : 8;
+                 }
+ 
+                 public int getObjectPadding()
+                 {
+-                    return 8;
++		    return 8;
+                 }
+ 
+                 public int getReferenceSize()
+                 {
+-                    return 4;
++                    if (bitMode != 64) 
++                       return 8;
++		    else
++			return !compressedRefs ? 8 : 4;
+                 }
+ 
+                 public int getSuperclassFieldPadding()
+                 {
+-                    return 4;
++                    return bitMode != 64 ? 4 : 8;
+                 }
++
+             };
++
+         }
+ 
++
++        final String dataModel = System.getProperty("sun.arch.data.model");
++        if ("32".equals(dataModel))
++	    {
++		// Running with 32-bit data model
++		return new MemoryLayoutSpecification()
++		    {
++			public int getArrayHeaderSize()
++			{
++			    return 12;
++			}
++
++			public int getObjectHeaderSize()
++			{
++			    return 8;
++			}
++
++			public int getObjectPadding()
++			{
++			    return 8;
++			}
++
++			public int getReferenceSize()
++			{
++			    return 4;
++			}
++
++			public int getSuperclassFieldPadding()
++			{
++			    return 4;
++			}
++		};
++	    }
++
+         final String strVmVersion = System.getProperty("java.vm.version");
+         final int vmVersion = Integer.parseInt(strVmVersion.substring(0, strVmVersion.indexOf('.')));
+         if (vmVersion >= 17)
+-        {
+-            long maxMemory = 0;
+-            for (MemoryPoolMXBean mp : ManagementFactory.getMemoryPoolMXBeans())
+-            {
+-                maxMemory += mp.getUsage().getMax();
+-            }
+-            if (maxMemory < 30L * 1024 * 1024 * 1024)
+-            {
+-                // HotSpot 17.0 and above use compressed OOPs below 30GB of RAM
+-                // total for all memory pools (yes, including code cache).
+-                return new MemoryLayoutSpecification()
+-                {
+-                    public int getArrayHeaderSize()
+-                    {
+-                        return 16;
+-                    }
+-
+-                    public int getObjectHeaderSize()
+-                    {
+-                        return 12;
+-                    }
+-
+-                    public int getObjectPadding()
+-                    {
+-                        return 8;
+-                    }
+-
+-                    public int getReferenceSize()
+-                    {
+-                        return 4;
+-                    }
+-
+-                    public int getSuperclassFieldPadding()
+-                    {
+-                        return 4;
+-                    }
+-                };
+-            }
+-        }
++	    {
++		long maxMemory = 0;
++		for (MemoryPoolMXBean mp : ManagementFactory.getMemoryPoolMXBeans())
++		    {
++			maxMemory += mp.getUsage().getMax();
++		    }
++		if (maxMemory < 30L * 1024 * 1024 * 1024)
++		    {
++			// HotSpot 17.0 and above use compressed OOPs below 30GB of RAM
++			// total for all memory pools (yes, including code cache).
++			return new MemoryLayoutSpecification()
++			    {
++				public int getArrayHeaderSize()
++				{
++				    return 16;
++				}
++
++				public int getObjectHeaderSize()
++				{
++				    return 12;
++				}
++
++				public int getObjectPadding()
++				{
++				    return 8;
++				}
++
++				public int getReferenceSize()
++				{
++				    return 4;
++				}
++
++				public int getSuperclassFieldPadding()
++				{
++				    return 4;
++				}
++			};
++		    }
++	    }
+ 
+         /* Worst case we over count. */
+ 
+         // In other cases, it's a 64-bit uncompressed OOPs object model
+         return new MemoryLayoutSpecification()
+-        {
+-            public int getArrayHeaderSize()
+-            {
+-                return 24;
+-            }
+-
+-            public int getObjectHeaderSize()
+-            {
+-                return 16;
+-            }
+-
+-            public int getObjectPadding()
+-            {
+-                return 8;
+-            }
+-
+-            public int getReferenceSize()
+-            {
+-                return 8;
+-            }
+-
+-            public int getSuperclassFieldPadding()
+-            {
+-                return 8;
+-            }
++	    {
++		public int getArrayHeaderSize()
++		{
++		    return 24;
++		}
++
++		public int getObjectHeaderSize()
++		{
++		    return 16;
++		}
++
++		public int getObjectPadding()
++		{
++		    return 8;
++		}
++
++		public int getReferenceSize()
++		{
++		    return 8;
++		}
++
++		public int getSuperclassFieldPadding()
++		{
++		    return 8;
++		}
+         };
+     }
+ 
